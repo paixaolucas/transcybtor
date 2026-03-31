@@ -1,0 +1,22 @@
+# ── Binários de runtime (não commitados — tamanho/licença) ───────────────────
+bin/
+
+# ── Saídas de transcrição ────────────────────────────────────────────────────
+transcripts/
+
+# ── Build local (gerado pelo CI — não versionar) ─────────────────────────────
+installer/
+dist/
+
+# ── Configuração local do Claude Code ────────────────────────────────────────
+.claude/
+
+# ── Atalho do Windows (contém caminhos absolutos da máquina) ─────────────────
+*.lnk
+
+# ── Node.js ──────────────────────────────────────────────────────────────────
+node_modules/
+
+# ── Temporários ──────────────────────────────────────────────────────────────
+*.tmp
+*.log

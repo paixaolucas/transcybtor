@@ -1,0 +1,76 @@
+{
+  "name": "transcybtor",
+  "version": "1.0.0",
+  "description": "Transcribe YouTube videos to TXT, SRT, and JSON — zero dependencies",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "transcribe": "node src/transcribe.mjs",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac"
+  },
+  "devDependencies": {
+    "electron": "^34.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.transcybtor.app",
+    "productName": "Transcybtor",
+    "copyright": "Copyright © 2026",
+    "asar": true,
+    "asarUnpack": [
+      "preload.js",
+      "src/**"
+    ],
+    "directories": {
+      "output": "installer"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**",
+      "src/**",
+      "!node_modules/**"
+    ],
+    "extraResources": [
+      {
+        "from": "bin",
+        "to": "bin",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "icon": "assets/transcribe.ico",
+      "signingHashAlgorithms": null,
+      "sign": null,
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "perMachine": false,
+      "artifactName": "Transcybtor-Setup.exe",
+      "installerIcon": "assets/transcribe.ico",
+      "uninstallerIcon": "assets/transcribe.ico"
+    },
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["x64", "arm64"] }
+      ]
+    },
+    "dmg": {
+      "artifactName": "Transcybtor-Setup.dmg"
+    }
+  }
+}

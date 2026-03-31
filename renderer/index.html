@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Transcybtor</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+
+    <!-- ── Header ── -->
+    <header class="header">
+      <div class="header-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+      </div>
+      <div class="header-text">
+        <h1>Transcybtor</h1>
+        <p>YouTube · TikTok · Instagram · e mais</p>
+      </div>
+    </header>
+
+    <!-- ── Input ── -->
+    <section class="section section-input">
+      <label class="label" for="url-input">URL ou caminho do arquivo</label>
+      <div class="input-wrapper" id="drop-zone">
+        <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+          <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+        </svg>
+        <input
+          id="url-input"
+          type="text"
+          placeholder="Cole a URL aqui ou arraste um arquivo de áudio…"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <button class="browse-btn" id="btn-browse" title="Escolher arquivo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+        </button>
+      </div>
+    </section>
+
+    <!-- ── Idioma ── -->
+    <section class="section section-lang">
+      <label class="label">Idioma</label>
+      <div class="pills" id="lang-pills">
+        <button class="pill active" data-lang="auto">Auto</button>
+        <button class="pill" data-lang="pt">Português</button>
+        <button class="pill" data-lang="en">English</button>
+        <button class="pill" data-lang="es">Español</button>
+        <button class="pill" data-lang="fr">Français</button>
+        <button class="pill" data-lang="de">Deutsch</button>
+        <button class="pill" data-lang="ja">日本語</button>
+        <button class="pill" data-lang="zh">中文</button>
+      </div>
+    </section>
+
+    <!-- ── Formato ── -->
+    <section class="section section-fmt">
+      <label class="label">Formato de saída</label>
+      <div class="toggles" id="fmt-toggles">
+        <button class="toggle active" data-fmt="txt">
+          <span class="toggle-dot"></span>
+          TXT
+        </button>
+        <button class="toggle active" data-fmt="srt">
+          <span class="toggle-dot"></span>
+          SRT
+        </button>
+        <button class="toggle active" data-fmt="json">
+          <span class="toggle-dot"></span>
+          JSON
+        </button>
+      </div>
+    </section>
+
+    <!-- ── Submit ── -->
+    <section class="section section-submit">
+      <button class="btn-primary" id="btn-transcribe">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polygon points="5 3 19 12 5 21 5 3"/>
+        </svg>
+        Transcrever
+      </button>
+    </section>
+
+    <!-- ── Progress ── -->
+    <section class="section section-progress hidden" id="section-progress">
+      <div class="progress-header">
+        <span class="progress-label" id="progress-label">Iniciando…</span>
+        <span class="progress-pct" id="progress-pct">0%</span>
+      </div>
+      <div class="progress-track">
+        <div class="progress-bar" id="progress-bar"></div>
+      </div>
+      <p class="progress-title" id="progress-title"></p>
+    </section>
+
+    <!-- ── Result ── -->
+    <section class="section section-result hidden" id="section-result">
+      <div class="result-header">
+        <svg class="result-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+          <polyline points="22 4 12 14.01 9 11.01"/>
+        </svg>
+        <span>Transcrição concluída!</span>
+      </div>
+      <div class="result-files" id="result-files"></div>
+      <div class="result-bottom">
+        <button class="btn-folder" id="btn-folder">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+          Abrir pasta
+        </button>
+        <div class="result-dl hidden" id="result-dl">
+          <span class="dl-label">Baixar:</span>
+          <div class="dl-group" id="result-dl-group"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Error ── -->
+    <section class="section section-error hidden" id="section-error">
+      <div class="error-header">
+        <svg class="error-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="12"/>
+          <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+        <span>Erro na transcrição</span>
+      </div>
+      <p class="error-msg" id="error-msg"></p>
+      <button class="btn-retry" id="btn-retry">Tentar novamente</button>
+    </section>
+
+    <!-- ── Transcript Viewer ── -->
+    <section class="section section-transcript hidden" id="section-transcript">
+
+      <!-- Toolbar: tabs + busca -->
+      <div class="transcript-top">
+        <div class="transcript-tabs" id="transcript-tabs"></div>
+        <div class="transcript-search-wrap">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <input class="transcript-search-input" id="search-input" type="text"
+            placeholder="Buscar…" autocomplete="off" spellcheck="false" />
+          <span class="search-count" id="search-count"></span>
+          <button class="search-nav" id="btn-prev" title="Anterior">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="10" height="10">
+              <polyline points="18 15 12 9 6 15"/>
+            </svg>
+          </button>
+          <button class="search-nav" id="btn-next" title="Próximo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="10" height="10">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Stats -->
+      <div class="transcript-stats" id="transcript-stats"></div>
+
+      <!-- Editable content area -->
+      <textarea class="transcript-area" id="transcript-area" spellcheck="false"></textarea>
+
+      <!-- Actions: copy + downloads -->
+      <div class="transcript-actions">
+        <button class="action-btn" id="btn-copy-all">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+          Copiar tudo
+        </button>
+        <div class="dl-group">
+          <span class="dl-label">Baixar:</span>
+          <button class="dl-btn" id="dl-pdf">PDF</button>
+          <button class="dl-btn" id="dl-txt">TXT</button>
+          <button class="dl-btn" id="dl-srt">SRT</button>
+          <button class="dl-btn" id="dl-json">JSON</button>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- Toast global -->
+    <div class="toast" id="toast"></div>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

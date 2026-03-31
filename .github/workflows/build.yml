@@ -1,0 +1,129 @@
+name: Build Installers
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  # ─── Windows (.exe) ──────────────────────────────────────────────────────────
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Download Windows binaries
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path bin | Out-Null
+
+          # yt-dlp
+          Write-Host "Baixando yt-dlp..."
+          Invoke-WebRequest "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" `
+            -OutFile "bin/yt-dlp.exe" -UseBasicParsing
+
+          # ffmpeg (BtbN static build)
+          Write-Host "Baixando ffmpeg..."
+          $ffUrl = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+          Invoke-WebRequest $ffUrl -OutFile "$env:TEMP\ffmpeg.zip" -UseBasicParsing
+          Expand-Archive "$env:TEMP\ffmpeg.zip" "$env:TEMP\ffmpeg-ext" -Force
+          $ffExe = Get-ChildItem "$env:TEMP\ffmpeg-ext" -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
+          Copy-Item $ffExe.FullName "bin/ffmpeg.exe"
+
+          # whisper.cpp (com DLLs)
+          Write-Host "Baixando whisper.cpp..."
+          $api = Invoke-WebRequest "https://api.github.com/repos/ggerganov/whisper.cpp/releases/latest" `
+            -UseBasicParsing | ConvertFrom-Json
+          $tag = $api.tag_name
+          $wUrl = "https://github.com/ggerganov/whisper.cpp/releases/download/$tag/whisper-blas-bin-x64.zip"
+          Invoke-WebRequest $wUrl -OutFile "$env:TEMP\whisper.zip" -UseBasicParsing
+          Expand-Archive "$env:TEMP\whisper.zip" "$env:TEMP\whisper-ext" -Force
+          $wExe = Get-ChildItem "$env:TEMP\whisper-ext" -Recurse -Filter "whisper-cli.exe" | Select-Object -First 1
+          if (-not $wExe) {
+            $wExe = Get-ChildItem "$env:TEMP\whisper-ext" -Recurse -Filter "main.exe" | Select-Object -First 1
+          }
+          Copy-Item $wExe.FullName "bin/whisper-cli.exe"
+          Get-ChildItem "$env:TEMP\whisper-ext" -Recurse -Filter "*.dll" |
+            ForEach-Object { Copy-Item $_.FullName "bin/" -Force }
+
+          # modelo Whisper base (~142 MB)
+          Write-Host "Baixando modelo Whisper base..."
+          Invoke-WebRequest `
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin" `
+            -OutFile "bin/ggml-base.bin" -UseBasicParsing
+
+      - run: npm ci
+
+      - name: Build Windows installer
+        run: npm run build:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: installer/Transcybtor-Setup.exe
+
+  # ─── macOS (.dmg) ────────────────────────────────────────────────────────────
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Download macOS binaries
+        run: |
+          mkdir -p bin
+
+          # yt-dlp (universal binary estático — funciona em Intel e Apple Silicon)
+          echo "Baixando yt-dlp..."
+          curl -L "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos" \
+            -o bin/yt-dlp
+          chmod +x bin/yt-dlp
+
+          # ffmpeg (static build — evermeet.cx)
+          echo "Baixando ffmpeg..."
+          curl -L "https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip" -o /tmp/ffmpeg.zip
+          unzip -q /tmp/ffmpeg.zip -d /tmp/ffmpeg-ext
+          cp /tmp/ffmpeg-ext/ffmpeg bin/ffmpeg
+          chmod +x bin/ffmpeg
+
+          # whisper-cli (compilado do fonte — garante binário nativo sem deps externas)
+          echo "Compilando whisper.cpp..."
+          git clone --depth 1 https://github.com/ggerganov/whisper.cpp.git /tmp/whisper-src
+          cd /tmp/whisper-src
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DGGML_BLAS=OFF \
+            -DGGML_METAL=ON
+          cmake --build build --config Release -j$(sysctl -n hw.logicalcpu)
+          cp build/bin/whisper-cli $GITHUB_WORKSPACE/bin/whisper-cli \
+            || cp build/bin/main $GITHUB_WORKSPACE/bin/whisper-cli
+          chmod +x $GITHUB_WORKSPACE/bin/whisper-cli
+          cd $GITHUB_WORKSPACE
+
+          # modelo Whisper base (~142 MB)
+          echo "Baixando modelo Whisper base..."
+          curl -L \
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin" \
+            -o bin/ggml-base.bin
+
+      - run: npm ci
+
+      - name: Build macOS installer
+        run: npm run build:mac
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-installer
+          path: installer/Transcybtor-Setup.dmg
