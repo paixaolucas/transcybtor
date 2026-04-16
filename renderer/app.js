@@ -3,10 +3,10 @@
 // ─── State ───────────────────────────────────────────────────────────────────
 // States: IDLE | RUNNING | SUCCESS | ERROR
 
-let state = 'IDLE';
-let currentFolder = null;
-let cleanupListeners = [];
-let transcriptTitle  = '';   // set from TRANSCRIBER_TITLE event
+let state              = 'IDLE';
+let currentEventSource = null;
+let uploadedFile       = null;   // File object from browse / drag-drop
+let transcriptTitle    = '';     // set from TRANSCYBTOR_TITLE event
 
 // ─── Elements ─────────────────────────────────────────────────────────────────
 const urlInput      = document.getElementById('url-input');
@@ -25,21 +25,22 @@ const sectionResult = document.getElementById('section-result');
 const resultFiles   = document.getElementById('result-files');
 const btnFolder     = document.getElementById('btn-folder');
 
-const sectionError  = document.getElementById('section-error');
-const errorMsg      = document.getElementById('error-msg');
-const btnRetry      = document.getElementById('btn-retry');
+const sectionError = document.getElementById('section-error');
+const errorMsg     = document.getElementById('error-msg');
+const btnRetry     = document.getElementById('btn-retry');
 
 // ─── Transcript Viewer elements ───────────────────────────────────────────────
-const sectionTranscript  = document.getElementById('section-transcript');
-const transcriptTabsEl   = document.getElementById('transcript-tabs');
-const transcriptStatsEl  = document.getElementById('transcript-stats');
-const transcriptArea     = document.getElementById('transcript-area');
-const searchInput        = document.getElementById('search-input');
-const searchCount        = document.getElementById('search-count');
-const btnPrev            = document.getElementById('btn-prev');
-const btnNext            = document.getElementById('btn-next');
-const btnCopyAll         = document.getElementById('btn-copy-all');
-const toastEl            = document.getElementById('toast');
+const sectionTranscript = document.getElementById('section-transcript');
+const transcriptTabsEl  = document.getElementById('transcript-tabs');
+const transcriptStatsEl = document.getElementById('transcript-stats');
+const transcriptArea    = document.getElementById('transcript-area');
+const searchInput       = document.getElementById('search-input');
+const searchCount       = document.getElementById('search-count');
+const btnPrev           = document.getElementById('btn-prev');
+const btnNext           = document.getElementById('btn-next');
+const btnCopyAll        = document.getElementById('btn-copy-all');
+const toastEl           = document.getElementById('toast');
+const fileInput         = document.getElementById('file-input');
 
 // ─── Getters ──────────────────────────────────────────────────────────────────
 function getLanguage() {
@@ -52,11 +53,18 @@ function getFormats() {
     .map(b => b.dataset.fmt);
 }
 
+// ─── SSE cleanup ──────────────────────────────────────────────────────────────
+function cleanupIpcListeners() {
+  if (currentEventSource) {
+    currentEventSource.close();
+    currentEventSource = null;
+  }
+}
+
 // ─── State machine ────────────────────────────────────────────────────────────
 function transition(newState, payload) {
   state = newState;
 
-  // Reset all dynamic sections
   sectionProgress.classList.add('hidden');
   sectionResult.classList.add('hidden');
   sectionError.classList.add('hidden');
@@ -97,13 +105,11 @@ function transition(newState, payload) {
     cleanupIpcListeners();
 
     sectionResult.classList.remove('hidden');
-    currentFolder = payload.folder;
     resultFiles.innerHTML = '';
-    for (const f of payload.files) {
-      const ext = f.split('.').pop().toUpperCase();
+    for (const fmt of ['txt', 'srt', 'json'].filter(f => payload.files[f])) {
       const badge = document.createElement('span');
       badge.className = 'file-badge';
-      badge.textContent = ext;
+      badge.textContent = fmt.toUpperCase();
       resultFiles.appendChild(badge);
     }
     loadTranscript(payload.files);
@@ -131,36 +137,12 @@ function setProgress(pct, msg) {
   progressLabel.textContent = msg;
 }
 
-// ─── IPC listener management ──────────────────────────────────────────────────
-function cleanupIpcListeners() {
-  for (const fn of cleanupListeners) fn();
-  cleanupListeners = [];
-}
-
-function attachIpcListeners() {
-  cleanupListeners.push(
-    window.api.onProgress(({ pct, msg }) => {
-      setProgress(pct, msg);
-    }),
-    window.api.onTitle(({ title }) => {
-      progressTitle.textContent = title;
-      transcriptTitle = title;
-    }),
-    window.api.onDone((data) => {
-      transition('SUCCESS', data);
-    }),
-    window.api.onError(({ message }) => {
-      transition('ERROR', { message });
-    })
-  );
-}
-
 // ─── Transcribe action ────────────────────────────────────────────────────────
 async function startTranscribe() {
   if (state === 'RUNNING') return;
 
-  const url = urlInput.value.trim();
-  if (!url) {
+  const urlValue = urlInput.value.trim();
+  if (!urlValue && !uploadedFile) {
     dropZone.classList.add('shake');
     urlInput.focus();
     dropZone.addEventListener('animationend', () => {
@@ -169,26 +151,66 @@ async function startTranscribe() {
     return;
   }
 
-  const formats = getFormats();
+  let formats = getFormats();
   if (formats.length === 0) {
-    // At least one format required — activate all
     fmtToggles.querySelectorAll('.toggle').forEach(t => t.classList.add('active'));
+    formats = getFormats();
   }
 
   transcriptTitle = '';
   transition('RUNNING');
-  attachIpcListeners();
 
+  let jobId;
   try {
-    const result = await window.api.transcribe({
-      url,
-      language: getLanguage(),
-      formats: getFormats(),
-    });
-    transition('SUCCESS', result);
+    const formData = new FormData();
+    if (uploadedFile) {
+      formData.append('file', uploadedFile);
+    } else {
+      formData.append('url', urlValue);
+    }
+    formData.append('language', getLanguage());
+    formats.forEach(f => formData.append('formats', f));
+
+    const res = await fetch('/api/transcribe', { method: 'POST', body: formData });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `Erro ${res.status}`);
+    }
+    const data = await res.json();
+    jobId = data.jobId;
   } catch (err) {
     transition('ERROR', { message: err.message || String(err) });
+    return;
   }
+
+  const source = new EventSource(`/api/events/${jobId}`);
+  currentEventSource = source;
+
+  source.onmessage = (e) => {
+    const ev = JSON.parse(e.data);
+    if (ev.type === 'progress') {
+      setProgress(ev.pct, ev.msg);
+    } else if (ev.type === 'title') {
+      progressTitle.textContent = ev.title;
+      transcriptTitle = ev.title;
+    } else if (ev.type === 'done') {
+      source.close();
+      currentEventSource = null;
+      transition('SUCCESS', { files: ev.files });
+    } else if (ev.type === 'error') {
+      source.close();
+      currentEventSource = null;
+      transition('ERROR', { message: ev.message });
+    }
+  };
+
+  source.onerror = () => {
+    if (state === 'RUNNING') {
+      source.close();
+      currentEventSource = null;
+      transition('ERROR', { message: 'Conexão com o servidor perdida.' });
+    }
+  };
 }
 
 // ─── Language pills ───────────────────────────────────────────────────────────
@@ -213,31 +235,39 @@ urlInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') startTranscribe();
 });
 
-// ─── Open folder ──────────────────────────────────────────────────────────────
-btnFolder.addEventListener('click', () => {
-  if (currentFolder) window.api.openFolder(currentFolder);
+// Limpa arquivo carregado se o usuário digitar uma URL manualmente
+urlInput.addEventListener('input', () => {
+  if (uploadedFile && urlInput.value !== uploadedFile.name) {
+    uploadedFile = null;
+  }
 });
+
+// ─── Open folder (não aplicável na versão web) ────────────────────────────────
+btnFolder.style.display = 'none';
 
 // ─── Retry ───────────────────────────────────────────────────────────────────
 btnRetry.addEventListener('click', () => {
   transition('IDLE');
 });
 
-// ─── Browse button ───────────────────────────────────────────────────────────
-document.getElementById('btn-browse').addEventListener('click', async () => {
-  const filePath = await window.api.openFilePicker();
-  if (filePath) {
-    urlInput.value = filePath;
-    urlInput.dispatchEvent(new Event('input'));
+// ─── Browse button → input file ───────────────────────────────────────────────
+document.getElementById('btn-browse').addEventListener('click', () => {
+  fileInput.click();
+});
+
+fileInput.addEventListener('change', (e) => {
+  const file = e.target.files?.[0];
+  if (file) {
+    uploadedFile = file;
+    urlInput.value = file.name;
+    fileInput.value = ''; // permite re-selecionar o mesmo arquivo
   }
 });
 
 // ─── Drag & drop ─────────────────────────────────────────────────────────────
 const ACCEPTED_EXTS = new Set([
-  // áudio / vídeo
   'mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg', 'opus',
   'wma', 'webm', 'mp4', 'mkv', 'avi', 'mov',
-  // legendas
   'vtt', 'srt',
 ]);
 
@@ -260,14 +290,12 @@ document.addEventListener('drop', (e) => {
   if (!file) return;
 
   const ext = file.name.split('.').pop().toLowerCase();
-  const filePath = window.api.getPathForFile(file);
 
-  if (ACCEPTED_EXTS.has(ext) && filePath) {
-    urlInput.value = filePath;
-    urlInput.dispatchEvent(new Event('input'));
+  if (ACCEPTED_EXTS.has(ext)) {
+    uploadedFile = file;
+    urlInput.value = file.name;
     urlInput.focus();
   } else {
-    // Tipo não suportado — sacudir o campo e mostrar feedback
     dropZone.classList.add('shake');
     dropZone.addEventListener('animationend', () => dropZone.classList.remove('shake'), { once: true });
     urlInput.placeholder = `Tipo não suportado (.${ext}). Use: mp3, wav, ogg, vtt, srt…`;
@@ -277,7 +305,7 @@ document.addEventListener('drop', (e) => {
   }
 });
 
-// ─── Spin animation (inline, no keyframe conflict) ───────────────────────────
+// ─── Spin animation ───────────────────────────────────────────────────────────
 const spinStyle = document.createElement('style');
 spinStyle.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
 document.head.appendChild(spinStyle);
@@ -287,7 +315,7 @@ document.head.appendChild(spinStyle);
 // ═══════════════════════════════════════════════════════════════════════════════
 
 let transcriptContents = {};   // { txt: '...', srt: '...', json: '...' }
-let transcriptFiles    = {};   // { txt: '/path/...', srt: '...', json: '...' }
+let transcriptFiles    = {};   // não usado na versão web, mantido por compatibilidade
 let activeFormat       = '';
 let currentTitle       = '';
 
@@ -300,30 +328,23 @@ function showToast(msg) {
   toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2200);
 }
 
-// ─── Load transcript files ────────────────────────────────────────────────────
-async function loadTranscript(files) {
-  // Derive a display title
+// ─── Load transcript (recebe objeto { txt, srt, json } direto do servidor) ────
+function loadTranscript(fileContents) {
   if (transcriptTitle) {
     currentTitle = transcriptTitle;
     transcriptTitle = '';
   } else {
-    const raw = urlInput.value.trim().replace(/^["']|["']$/g, '');
+    const raw  = urlInput.value.trim().replace(/^["']|["']$/g, '');
     const base = raw.replace(/\\/g, '/').split('/').pop();
     currentTitle = base.replace(/\.[^.]+$/, '') || 'Transcrição';
   }
 
   transcriptContents = {};
   transcriptFiles    = {};
-  activeFormat       = '';   // reset to avoid switchTab overwriting fresh content
+  activeFormat       = '';
 
-  for (const f of files) {
-    const ext = f.split('.').pop().toLowerCase();
-    if (['txt', 'srt', 'json'].includes(ext)) {
-      transcriptFiles[ext] = f;
-      try {
-        transcriptContents[ext] = await window.api.readFile(f);
-      } catch {}
-    }
+  for (const fmt of ['txt', 'srt', 'json']) {
+    if (fileContents[fmt]) transcriptContents[fmt] = fileContents[fmt];
   }
 
   buildTabs();
@@ -335,8 +356,8 @@ async function loadTranscript(files) {
 }
 
 function showResultDownloads() {
-  const dlEl   = document.getElementById('result-dl');
-  const group  = document.getElementById('result-dl-group');
+  const dlEl  = document.getElementById('result-dl');
+  const group = document.getElementById('result-dl-group');
   if (!dlEl || !group) return;
   group.innerHTML = '';
 
@@ -373,7 +394,6 @@ function buildTabs() {
 }
 
 function switchTab(fmt) {
-  // Save any edits to the current tab before leaving
   if (activeFormat && transcriptContents[activeFormat] !== undefined) {
     transcriptContents[activeFormat] = transcriptArea.value;
   }
@@ -452,7 +472,6 @@ function jumpToMatch() {
   transcriptArea.focus();
   transcriptArea.setSelectionRange(start, end);
 
-  // Approximate scroll: count newlines before match
   const before = transcriptArea.value.substring(0, start);
   const lineNo  = (before.match(/\n/g) || []).length;
   const lineH   = parseFloat(getComputedStyle(transcriptArea).lineHeight) || 22;
@@ -494,7 +513,6 @@ btnNext.addEventListener('click', () => {
   jumpToMatch();
 });
 
-// Ctrl+F → foca a busca do viewer (sobrescreve o find nativo do Electron)
 document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
     if (!sectionTranscript.classList.contains('hidden')) {
@@ -507,7 +525,6 @@ document.addEventListener('keydown', (e) => {
 
 // ─── Copy all ─────────────────────────────────────────────────────────────────
 btnCopyAll.addEventListener('click', async () => {
-  // Sync any edits first
   if (activeFormat) transcriptContents[activeFormat] = transcriptArea.value;
   const text = transcriptArea.value;
   try {
@@ -527,44 +544,41 @@ function safeFileName(title) {
     .slice(0, 60);
 }
 
-async function downloadText(fmt) {
-  // Always use the (possibly edited) textarea content for the active tab
+function downloadText(fmt) {
   if (activeFormat === fmt) transcriptContents[fmt] = transcriptArea.value;
   const content = transcriptContents[fmt];
   if (!content) return;
 
-  const name = safeFileName(currentTitle);
-  const result = await window.api.saveFile({
-    defaultName: `${name}.${fmt}`,
-    content,
-    filters: [
-      { name: fmt.toUpperCase(), extensions: [fmt] },
-      { name: 'Todos os arquivos', extensions: ['*'] },
-    ],
-  });
-  if (!result.canceled) showToast('Arquivo salvo!');
+  const mime = fmt === 'json' ? 'application/json' : 'text/plain';
+  const blob = new Blob([content], { type: `${mime};charset=utf-8` });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `${safeFileName(currentTitle)}.${fmt}`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('Download iniciado!');
 }
 
 async function downloadPdf() {
-  // Sync edits
   if (activeFormat) transcriptContents[activeFormat] = transcriptArea.value;
   const txtContent = transcriptContents.txt || transcriptArea.value;
-  const name  = safeFileName(currentTitle);
-  const now   = new Date().toLocaleDateString('pt-BR');
-  const textOnly  = txtContent.replace(/\[\d{2}:\d{2}(?::\d{2})?\]\s*/g, '').trim();
-  const wordCount = textOnly ? textOnly.split(/\s+/).filter(Boolean).length : 0;
+  const name       = safeFileName(currentTitle);
+  const now        = new Date().toLocaleDateString('pt-BR');
+  const textOnly   = txtContent.replace(/\[\d{2}:\d{2}(?::\d{2})?\]\s*/g, '').trim();
+  const wordCount  = textOnly ? textOnly.split(/\s+/).filter(Boolean).length : 0;
 
   const escape = (s) => s
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 
-  // Build first line as document title (strip its timestamp)
   const firstLine = (txtContent.split('\n')[0] || '')
     .replace(/^\[\d{2}:\d{2}(?::\d{2})?\]\s*/, '').trim();
   const docTitle = escape(firstLine || currentTitle);
 
-  // Colorize timestamps in content
   const body = escape(txtContent)
     .replace(/\[(\d{2}:\d{2}(?::\d{2})?)\]/g,
       '<span class="ts">[$1]</span>');
@@ -584,31 +598,15 @@ async function downloadPdf() {
       max-width: 820px;
       margin: 0 auto;
     }
-    h1 {
-      font-size: 17pt;
-      font-weight: 700;
-      color: #0d0d0f;
-      margin-bottom: 6px;
-      letter-spacing: -0.3px;
-    }
+    h1 { font-size: 17pt; font-weight: 700; color: #0d0d0f; margin-bottom: 6px; letter-spacing: -0.3px; }
     .meta {
-      font-size: 9.5pt;
-      color: #6e7681;
-      margin-bottom: 28px;
-      padding-bottom: 14px;
-      border-bottom: 1.5px solid #d1d5da;
+      font-size: 9.5pt; color: #6e7681; margin-bottom: 28px;
+      padding-bottom: 14px; border-bottom: 1.5px solid #d1d5da;
       font-family: -apple-system, sans-serif;
     }
-    .content {
-      white-space: pre-wrap;
-      word-break: break-word;
-      font-size: 11pt;
-    }
-    .ts {
-      color: #0096b7;
-      font-family: 'Consolas', monospace;
-      font-size: 9.5pt;
-    }
+    .content { white-space: pre-wrap; word-break: break-word; font-size: 11pt; }
+    .ts { color: #0096b7; font-family: 'Consolas', monospace; font-size: 9.5pt; }
+    @media print { body { padding: 0; } }
   </style>
 </head>
 <body>
@@ -618,8 +616,25 @@ async function downloadPdf() {
 </body>
 </html>`;
 
-  const result = await window.api.exportPdf({ html, defaultName: `${name}.pdf` });
-  if (!result.canceled) showToast('PDF salvo!');
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url  = URL.createObjectURL(blob);
+  const win  = window.open(url, '_blank');
+  if (win) {
+    win.addEventListener('load', () => {
+      win.print();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    });
+  } else {
+    // Popup bloqueado — baixa como HTML para impressão manual
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${name}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast('Popup bloqueado — HTML baixado para impressão.');
+  }
 }
 
 document.getElementById('dl-pdf').addEventListener('click', downloadPdf);

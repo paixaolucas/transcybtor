@@ -364,7 +364,9 @@ function findCaptionTracks(info) {
   const tracks = [];
 
   // 1. Legendas manuais (maior prioridade)
+  // Ignora "live_chat" — é o replay do chat ao vivo, não uma legenda real
   for (const [lang, formats] of Object.entries(info.subtitles || {})) {
+    if (lang === "live_chat") continue;
     if (formats?.length > 0) {
       tracks.push({
         language: lang,

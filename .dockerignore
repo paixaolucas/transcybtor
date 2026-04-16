@@ -1,0 +1,10 @@
+node_modules
+bin
+dist
+installer
+transcripts
+.claude
+*.lnk
+*.log
+*.tmp
+.git
